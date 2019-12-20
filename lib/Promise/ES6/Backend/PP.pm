@@ -46,41 +46,50 @@ sub new {
 
     my $suppress_unhandled_rejection_warning = 1;
 
-    # NB: These MUST NOT refer to $self, or else we can get memory leaks
-    # depending on how $resolver and $rejector are used.
-    my $resolver = sub {
-        $$value_sr = $_[0];
-        bless $value_sr, _RESOLUTION_CLASS();
-
-        # NB: UNIVERSAL::isa() is used in order to avoid an eval {}.
-        # It is acknowledged that many Perl experts strongly discourage
-        # use of this technique.
-        if ( UNIVERSAL::isa( $$value_sr, __PACKAGE__ ) ) {
-            _repromise( $value_sr, \@children, $value_sr );
-        }
-        elsif (@children) {
-            $_->_settle($value_sr) for splice @children;
-        }
-    };
-
-    my $rejecter = sub {
-        $$value_sr = $_[0];
-        bless $value_sr, _REJECTION_CLASS();
-
-        if ( !$suppress_unhandled_rejection_warning ) {
-            $_UNHANDLED_REJECTIONS{$value_sr} = $value_sr;
-        }
-
-        if ( UNIVERSAL::isa( $$value_sr, __PACKAGE__ ) ) {
-            _repromise( $value_sr, \@children, $value_sr );
-        }
-        elsif (@children) {
-            $_->_settle($value_sr) for splice @children;
-        }
-    };
-
     local $@;
-    if ( !eval { $cr->( $resolver, $rejecter ); 1 } ) {
+    if (
+        !eval {
+            $cr->(
+
+                # RESOLVER
+                # NB: These MUST NOT refer to $self, or else we can get memory leaks
+                # depending on how $resolver and $rejector are used.
+                sub {
+                    $$value_sr = $_[0];
+                    bless $value_sr, _RESOLUTION_CLASS();
+
+                    # NB: UNIVERSAL::isa() is used in order to avoid an eval {}.
+                    # It is acknowledged that many Perl experts strongly discourage
+                    # use of this technique.
+                    if ( UNIVERSAL::isa( $$value_sr, __PACKAGE__ ) ) {
+                        _repromise( $value_sr, \@children, $value_sr );
+                    }
+                    elsif (@children) {
+                        $_->_settle($value_sr) for splice @children;
+                    }
+                },
+
+                # REJECTOR
+                sub {
+                    $$value_sr = $_[0];
+                    bless $value_sr, _REJECTION_CLASS();
+
+                    if ( !$suppress_unhandled_rejection_warning ) {
+                        $_UNHANDLED_REJECTIONS{$value_sr} = $value_sr;
+                    }
+
+                    if ( UNIVERSAL::isa( $$value_sr, __PACKAGE__ ) ) {
+                        _repromise( $value_sr, \@children, $value_sr );
+                    }
+                    elsif (@children) {
+                        $_->_settle($value_sr) for splice @children;
+                    }
+                }
+
+            );
+            1;
+        }
+    ) {
         $$value_sr = $@;
         bless $value_sr, _REJECTION_CLASS();
 
@@ -209,7 +218,7 @@ sub _settle {
         bless $self->[_VALUE_SR_IDX], ref($final_value_sr);
         ${ $self->[_VALUE_SR_IDX] } = $$final_value_sr;
 
-        if ( $settle_is_rejection ) {
+        if ($settle_is_rejection) {
             $_UNHANDLED_REJECTIONS{ $self->[_VALUE_SR_IDX] } = $self->[_VALUE_SR_IDX];
         }
     }
